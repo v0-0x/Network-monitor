@@ -115,6 +115,8 @@ jobs:
           GOOS=windows go vet ./...
           GOOS=darwin CGO_ENABLED=0 go vet ./internal/...
       - run: go test -count=1 -timeout 5m ./...
+      - name: Ping and traffic per connection (shown)
+        run: go test -count=1 -v -run 'ICMP|CountsBytes|SeesOwn' ./internal/netstat/ ./internal/ping/
       - name: Build and self-test
         run: |
           go build -tags desktop,production,webkit2_41 -o network-monitor .
@@ -186,6 +188,10 @@ jobs:
         run: |
           go test -count=1 -timeout 5m ./internal/...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Ping and traffic per connection (shown)
+        run: |
+          go test -count=1 -v -run 'ICMP|CountsBytes|SeesOwn' ./internal/netstat/ ./internal/ping/
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build
         run: |
           $w = Get-Content wails.json -Raw | ConvertFrom-Json
@@ -234,6 +240,8 @@ jobs:
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION
       - name: Tests
         run: go test -count=1 -timeout 5m ./internal/...
+      - name: Ping and traffic per connection (shown)
+        run: go test -count=1 -v -run 'ICMP|CountsBytes|SeesOwn' ./internal/netstat/ ./internal/ping/
       - name: Build (Apple silicon and Intel in one app)
         run: |
           # macOS icons keep a margin around the tile.
