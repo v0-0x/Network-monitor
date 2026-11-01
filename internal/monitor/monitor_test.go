@@ -42,8 +42,11 @@ func TestScanEvents(t *testing.T) {
 	st := settings.Load(filepath.Join(dir, "settings.json"))
 	st.Update(func(s *settings.Settings) { s.ResolveNames = false })
 	lg, _ := logs.Open(filepath.Join(dir, "logs"))
+	defer lg.Close() // Windows can't delete the test folder with the log open
+	g := geo.Open(filepath.Join(dir, "geo"))
+	defer g.Close()
 	var snaps []Snapshot
-	m := New(Options{Settings: st, Geo: geo.Open(filepath.Join(dir, "geo")), Logs: lg, OnSnapshot: func(s Snapshot) { snaps = append(snaps, s) }})
+	m := New(Options{Settings: st, Geo: g, Logs: lg, OnSnapshot: func(s Snapshot) { snaps = append(snaps, s) }})
 	src := &fakeSource{}
 	m.src = src
 

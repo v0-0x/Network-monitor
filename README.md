@@ -10,6 +10,9 @@
 
 - **A live globe.** A line runs from every address your computer is connected to, to where you are. A light travels along it in the direction the connection was opened: white for connections you made, amber for ones others made to you (a server you run, a game you host).
 - **Hover a line (or its dot)** to see who it is: the host name, the network that owns the address (Google LLC, Cloudflare, your ISP…) and its AS number, the city, region and country, coordinates, time zone and distance from you, the program on your computer that holds the connection (and its PID), the ports and service, and how long it's been open. Click to pick it and fly there.
+
+  ![Hovering a line](docs/hover.png)
+
 - **Connected now:** the hosts you're connected to, newest first, with the details a click away.
 - **Connections:** every open connection in a table you can sort and filter (program, address, country, network, port, direction), and **Open ports**: what this computer offers to others, by which program and whether it's reachable from other computers or only this one.
 - **Logs:** every connection opened and closed (with how long it was open), every port opened and closed, your public address changing (a VPN connecting), kept one file per day for as long as you choose. Search them, filter by kind, and export a day as CSV.
