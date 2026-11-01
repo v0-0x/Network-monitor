@@ -28,7 +28,7 @@ func cantInstall() string {
 	exe, _ := os.Executable()
 	exe, _ = filepath.EvalSymlinks(exe)
 	if _, err := os.Stat(pacman); err != nil {
-		return "Updates install themselves on Arch Linux. Here: cd ~/Network-monitor && git pull && make && sudo make install"
+		return "Updates install themselves on Arch Linux (pacman). Update this copy with: cd ~/Network-monitor && git pull && make"
 	}
 	if exe != installedExe {
 		return "This copy wasn't installed as a package. Update it with: cd ~/Network-monitor && git pull && cd packaging/arch && makepkg -sif"
