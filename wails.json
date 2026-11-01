@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "network-monitor",
+  "outputfilename": "network-monitor",
+  "frontend:install": "npm ci --no-audit --no-fund",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "./frontend/src",
+  "author": {
+    "name": "v0-0x"
+  },
+  "info": {
+    "companyName": "v0-0x",
+    "productName": "Network Monitor",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 v0-0x",
+    "comments": "Every connection this computer makes, live, on a globe"
+  }
+}

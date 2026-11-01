@@ -1,0 +1,344 @@
+# Builds Network Monitor for Arch Linux, Windows and macOS on every push,
+# and releases it from main.
+#
+# Every push to main is a beta: a GitHub pre-release "v0.1.<commits>" with
+# the three systems' files and SHA256SUMS.txt. It becomes the stable release
+# when the commit's title (its first line only) has [stable] in it, or when
+# this workflow is run by hand with channel "stable"; a version that's
+# already out as a beta is then only promoted (same files, nothing rebuilt).
+# "demote" turns a stable release back into a beta.
+#
+# Other branches and pull requests build and test on all three systems and
+# keep the files as workflow artifacts; they release nothing.
+
+name: Build and release
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "beta, stable (promotes the beta of this commit) or demote"
+        type: choice
+        options: [beta, stable, demote]
+        default: beta
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a run on main: each one publishes.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  WAILS_VERSION: v2.17.0
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+      publish: ${{ steps.v.outputs.publish }}
+      action: ${{ steps.v.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="0.1.$(git rev-list --count HEAD)"
+          title="$(printf '%s\n' "$MESSAGE" | head -n1)"
+          channel=beta
+          if [ "$EVENT" = workflow_dispatch ]; then
+            channel="$INPUT_CHANNEL"
+          elif printf '%s' "$title" | grep -qF '[stable]'; then
+            channel=stable
+          fi
+          publish=false
+          if [ "$REF" = refs/heads/main ] && [ "$EVENT" != pull_request ]; then publish=true; fi
+          # build: make the files (and release them when publishing);
+          # promote/demote: only change the release that's there.
+          action=build
+          if [ "$publish" = true ]; then
+            pre=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease 2>/dev/null || true)
+            if [ "$channel" = demote ]; then
+              action=demote
+            elif [ "$channel" = stable ] && [ "$pre" = true ]; then
+              action=promote
+            elif [ -n "$pre" ] && [ "$channel" = beta ]; then
+              action=none # this version is already out
+            fi
+          elif [ "$channel" = demote ]; then
+            action=none
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+          echo "Network Monitor $version, $channel, publish=$publish, action=$action" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    needs: version
+    if: needs.version.outputs.action == 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Formatting
+        run: |
+          bad=$(gofmt -l .)
+          if [ -n "$bad" ]; then echo "::error::not gofmt-ed: $bad"; exit 1; fi
+      - name: Page (TypeScript check and build)
+        run: cd frontend && npm ci --no-audit --no-fund && npm run build
+      - name: Vet (Linux, and the Windows and macOS code)
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          GOOS=darwin CGO_ENABLED=0 go vet ./internal/...
+      - run: go test -count=1 -timeout 5m ./...
+      - name: Build and self-test
+        run: |
+          go build -tags desktop,production,webkit2_41 -o network-monitor .
+          ./network-monitor --version
+          ./network-monitor --self-test
+
+  arch:
+    needs: version
+    if: needs.version.outputs.action == 'build'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed base-devel git go npm webkit2gtk-4.1 gtk3 hicolor-icon-theme
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package
+        env:
+          NETMON_CHANNEL: ${{ needs.version.outputs.channel }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          useradd -m builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+          su builder -c "git config --global --add safe.directory '$GITHUB_WORKSPACE' && cd '$GITHUB_WORKSPACE/packaging/arch' && NETMON_CHANNEL='$NETMON_CHANNEL' makepkg -f --noconfirm"
+          pkg="packaging/arch/network-monitor-$VERSION-1-x86_64.pkg.tar.zst"
+          test -f "$pkg" || { ls packaging/arch; echo "::error::expected $pkg"; exit 1; }
+          pacman -U --noconfirm "$pkg"
+          out=$(network-monitor --version)
+          echo "$out"
+          [ "$out" = "Network Monitor $VERSION" ]
+          network-monitor --self-test
+          mkdir -p out && cp "$pkg" out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: out/*
+
+  windows:
+    needs: version
+    if: needs.version.outputs.action == 'build'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Tools
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@$env:WAILS_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Tests
+        run: |
+          go test -count=1 -timeout 5m ./internal/...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build
+        run: |
+          $w = Get-Content wails.json -Raw | ConvertFrom-Json
+          $w.info.productVersion = $env:VERSION
+          $w | ConvertTo-Json -Depth 10 | Set-Content wails.json
+          wails build -platform windows/amd64 -nsis -ldflags "-X main.version=$env:VERSION -X main.channel=$env:CHANNEL -X main.commit=$env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Self-test
+        run: |
+          $exe = "build\bin\network-monitor.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--version" -Wait -PassThru -NoNewWindow -RedirectStandardOutput version.txt
+          $v = (Get-Content version.txt -Raw).Trim()
+          Write-Output $v
+          if ($v -ne "Network Monitor $env:VERSION") { Write-Output "::error::version is '$v'"; exit 1 }
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow -RedirectStandardOutput self.txt
+          Get-Content self.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+      - name: Name the files
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item build\bin\network-monitor.exe "out\NetworkMonitor-$env:VERSION-windows-x64.exe"
+          Copy-Item build\bin\network-monitor-amd64-installer.exe "out\NetworkMonitor-Setup-$env:VERSION-windows-x64.exe"
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+
+  macos:
+    needs: version
+    if: needs.version.outputs.action == 'build'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION
+      - name: Tests
+        run: go test -count=1 -timeout 5m ./internal/...
+      - name: Build (Apple silicon and Intel in one app)
+        run: |
+          # macOS icons keep a margin around the tile.
+          cp packaging/icons/network-monitor-macos.png build/appicon.png
+          jq --arg v "$VERSION" '.info.productVersion = $v' wails.json > wails.tmp && mv wails.tmp wails.json
+          wails build -platform darwin/universal -ldflags "-X main.version=$VERSION -X main.channel=$CHANNEL -X main.commit=$GITHUB_SHA"
+          app=$(find build/bin -maxdepth 1 -name '*.app' | head -n1)
+          if [ "$app" != "build/bin/Network Monitor.app" ]; then mv "$app" "build/bin/Network Monitor.app"; fi
+          codesign --force --deep --sign - "build/bin/Network Monitor.app"
+          codesign --verify --deep --strict "build/bin/Network Monitor.app"
+          lipo -archs "build/bin/Network Monitor.app/Contents/MacOS/network-monitor"
+          plutil -p "build/bin/Network Monitor.app/Contents/Info.plist" | grep -E 'Version|Minimum|Identifier'
+      - name: Self-test
+        run: |
+          bin="build/bin/Network Monitor.app/Contents/MacOS/network-monitor"
+          out=$("$bin" --version)
+          echo "$out"
+          [ "$out" = "Network Monitor $VERSION" ]
+          "$bin" --self-test
+          arch -x86_64 "$bin" --self-test >/dev/null && echo "Intel build runs too"
+      - name: Open it (and take a picture)
+        run: |
+          export NETMON_DATA_DIR="$RUNNER_TEMP/nm-data"
+          "build/bin/Network Monitor.app/Contents/MacOS/network-monitor" --demo &
+          pid=$!
+          sleep 20
+          kill -0 $pid || { echo "::error::the app quit by itself"; exit 1; }
+          screencapture -x "$RUNNER_TEMP/macos.png" || true
+          kill $pid || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-screenshot
+          path: ${{ runner.temp }}/macos.png
+          if-no-files-found: ignore
+      - name: Zip and disk image
+        run: |
+          mkdir -p out dmg
+          ditto -c -k --sequesterRsrc --keepParent "build/bin/Network Monitor.app" "out/NetworkMonitor-$VERSION-macos-universal.zip"
+          ditto "build/bin/Network Monitor.app" "dmg/Network Monitor.app"
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Network Monitor" -srcfolder dmg -ov -format UDZO "out/NetworkMonitor-$VERSION-macos-universal.dmg"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: out/*
+
+  publish:
+    needs: [version, test, arch, windows, macos]
+    if: always() && needs.version.outputs.publish == 'true' && needs.version.outputs.action != 'none' && (needs.version.outputs.action != 'build' || (needs.test.result == 'success' && needs.arch.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+      ACTION: ${{ needs.version.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.version.outputs.action == 'build'
+        with:
+          path: artifacts
+          pattern: "{arch,windows,macos}"
+          merge-multiple: true
+      - name: Release
+        run: |
+          tag="v$VERSION"
+          beta_line="**Beta.** Try it before it's marked stable; turn on Settings › Updates › Beta updates to get these."
+          case "$ACTION" in
+            build)
+              cd artifacts
+              sha256sum * > SHA256SUMS.txt
+              cat SHA256SUMS.txt
+              cd ..
+              prev=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+              if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
+              changes=$(git log --no-merges --format='- %s' -n 40 $range)
+              {
+                if [ "$CHANNEL" = beta ]; then echo "$beta_line"; echo; fi
+                echo "## What's new"
+                echo "$changes"
+                echo
+                echo "## Install"
+                echo "- **Arch Linux:** \`sudo pacman -U network-monitor-$VERSION-1-x86_64.pkg.tar.zst\`"
+                echo "- **Windows:** \`NetworkMonitor-Setup-$VERSION-windows-x64.exe\` (or the plain .exe, no install needed)."
+                echo "- **macOS 12+:** open the .dmg and drag Network Monitor to Applications. It isn't signed by Apple: the first time, right-click it and choose Open."
+              } > notes.md
+              flags="--latest"
+              title="Network Monitor $VERSION"
+              if [ "$CHANNEL" = beta ]; then flags="--prerelease --latest=false"; title="$title beta"; fi
+              gh release create "$tag" artifacts/* --target "$GITHUB_SHA" --title "$title" --notes-file notes.md $flags
+              ;;
+            promote)
+              gh release view "$tag" --json body --jq .body | grep -vF "**Beta.**" | sed '/./,$!d' > notes.md
+              gh release edit "$tag" --prerelease=false --latest --title "Network Monitor $VERSION" --notes-file notes.md
+              ;;
+            demote)
+              { echo "$beta_line"; echo; gh release view "$tag" --json body --jq .body; } > notes.md
+              gh release edit "$tag" --prerelease --latest=false --title "Network Monitor $VERSION beta" --notes-file notes.md
+              newest=$(gh release list --exclude-pre-releases --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName')
+              if [ -n "$newest" ]; then gh release edit "$newest" --latest; fi
+              ;;
+          esac
+          echo "Released $tag ($ACTION, $CHANNEL)" >> "$GITHUB_STEP_SUMMARY"

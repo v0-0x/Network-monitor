@@ -1,0 +1,21 @@
+# build output
+/build/bin/
+/frontend/node_modules/
+/frontend/dist/*
+!/frontend/dist/.keep
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.pkg.tar.*
+/packaging/arch/network-monitor/
+/dist/
+*.log
+.DS_Store
+
+# Claude Code agent worktrees
+/.claude/worktrees/
+
+# made by every `wails build`
+/build/windows/installer/wails_tools.nsh
+/build/windows/installer/tmp/
+/build/darwin/Info.dev.plist
+/frontend/package.json.md5

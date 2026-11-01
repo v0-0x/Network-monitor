@@ -1,0 +1,54 @@
+# Network Monitor for Arch Linux, built from this checkout.
+#
+#   cd packaging/arch && makepkg -sif
+#
+# The version is 0.1.<number of commits>, the same number the releases
+# carry, so the app's updater and pacman agree on what's newer. (Counted
+# here rather than in a pkgver() function: that would make makepkg rewrite
+# this file in your checkout, and the next git pull would stop on it.)
+
+pkgname=network-monitor
+pkgver=0.1.$(git -C "${startdir:-.}/../.." rev-list --count HEAD 2>/dev/null || echo 0)
+pkgrel=1
+pkgdesc="Every connection your computer makes, live on a globe: which program, who it's talking to and where they are"
+arch=('x86_64' 'aarch64')
+url="https://github.com/v0-0x/Network-monitor"
+license=('GPL-3.0-or-later')
+depends=('webkit2gtk-4.1' 'gtk3' 'glibc' 'hicolor-icon-theme')
+makedepends=('go' 'npm' 'git')
+optdepends=('polkit: install updates from inside the app (asks for your password)')
+options=('!lto' '!debug')
+
+_root() { cd "$startdir/../.."; }
+
+build() {
+	_root
+	local commit
+	commit=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
+	(cd frontend && npm ci --no-audit --no-fund && npm run build)
+	export CGO_CPPFLAGS="${CPPFLAGS}" CGO_CFLAGS="${CFLAGS}" CGO_CXXFLAGS="${CXXFLAGS}" CGO_LDFLAGS="${LDFLAGS}"
+	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+	go build -tags desktop,production,webkit2_41 \
+		-ldflags "-s -w -linkmode=external -X main.version=${pkgver} -X main.channel=${NETMON_CHANNEL:-beta} -X main.commit=${commit}" \
+		-o "$srcdir/network-monitor" .
+}
+
+check() {
+	_root
+	go test -count=1 ./internal/...
+	"$srcdir/network-monitor" --self-test >/dev/null
+}
+
+package() {
+	_root
+	install -Dm755 "$srcdir/network-monitor" "$pkgdir/usr/lib/network-monitor/network-monitor"
+	install -dm755 "$pkgdir/usr/bin"
+	ln -s /usr/lib/network-monitor/network-monitor "$pkgdir/usr/bin/network-monitor"
+	install -Dm644 packaging/network-monitor.desktop "$pkgdir/usr/share/applications/network-monitor.desktop"
+	local s
+	for s in 16 32 48 64 128 256 512; do
+		install -Dm644 "packaging/icons/network-monitor-$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/network-monitor.png"
+	done
+	install -Dm644 packaging/icons/network-monitor.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/network-monitor.svg"
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

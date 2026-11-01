@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Network Monitor
+GenericName=Network Monitor
+Comment=Every connection your computer makes, live on a globe
+Exec=network-monitor
+Icon=network-monitor
+Terminal=false
+Categories=Network;System;Monitor;
+Keywords=network;connections;globe;ip;geolocation;firewall;traffic;
+StartupWMClass=network-monitor
