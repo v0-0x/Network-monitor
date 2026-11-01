@@ -27,6 +27,7 @@ const (
 	Listen   = "listen"   // a port opened for others to connect to
 	Unlisten = "unlisten" // that port closed
 	Note     = "note"     // something worth knowing
+	Alert    = "alert"    // a connection with a high risk score
 	Error    = "error"
 )
 
@@ -50,6 +51,9 @@ type Event struct {
 	Scope    string `json:"scope,omitempty"` // "public", "local" or "loopback"
 	Duration int64  `json:"dur,omitempty"`   // milliseconds the connection was open (Close)
 	Existing bool   `json:"existing,omitempty"`
+	Rx       uint64 `json:"rx,omitempty"`   // bytes received over the connection (Close)
+	Tx       uint64 `json:"tx,omitempty"`   // and sent
+	Risk     int    `json:"risk,omitempty"` // the host's risk score (Alert)
 	Message  string `json:"msg,omitempty"`
 }
 
@@ -318,7 +322,7 @@ func (s *Store) WriteCSV(q Query, w io.Writer) (int, error) {
 	}
 	s.mu.Unlock()
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"time", "event", "protocol", "process", "pid", "local", "remote ip", "remote port", "service", "host", "place", "country", "network", "direction", "duration (s)", "message"})
+	_ = cw.Write([]string{"time", "event", "protocol", "process", "pid", "local", "remote ip", "remote port", "service", "host", "place", "country", "network", "direction", "duration (s)", "received (bytes)", "sent (bytes)", "risk", "message"})
 	n := 0
 	err := s.each(q.Day, func(e Event) {
 		if !q.matches(e) {
@@ -336,7 +340,17 @@ func (s *Store) WriteCSV(q Query, w io.Writer) (int, error) {
 		if e.PID != 0 {
 			pid = strconv.Itoa(int(e.PID))
 		}
-		_ = cw.Write([]string{time.UnixMilli(e.Time).Format(time.RFC3339), e.Kind, e.Proto, e.Process, pid, e.Local, e.IP, port, e.Service, e.Host, e.Place, e.Country, e.Org, e.Dir, dur, e.Message})
+		num := func(n uint64) string {
+			if n == 0 {
+				return ""
+			}
+			return strconv.FormatUint(n, 10)
+		}
+		risk := ""
+		if e.Risk > 0 {
+			risk = strconv.Itoa(e.Risk)
+		}
+		_ = cw.Write([]string{time.UnixMilli(e.Time).Format(time.RFC3339), e.Kind, e.Proto, e.Process, pid, e.Local, e.IP, port, e.Service, e.Host, e.Place, e.Country, e.Org, e.Dir, dur, num(e.Rx), num(e.Tx), risk, e.Message})
 	})
 	cw.Flush()
 	if err == nil {

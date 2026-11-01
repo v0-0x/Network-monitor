@@ -19,6 +19,13 @@ type Socket struct {
 	Remote netip.AddrPort // the other end; not valid for listening sockets
 	State  string         // see the State constants; "" for UDP
 	PID    int32          // 0 when unknown (another user's process, or no process)
+
+	// What the system counts for this socket, where it does (see
+	// Scanner.PerConnection): bytes received and sent so far, and the
+	// connection's smoothed round-trip time.
+	Rx, Tx   uint64
+	HasBytes bool
+	RTT      time.Duration
 }
 
 // TCP states, the same on every system.
@@ -53,6 +60,7 @@ type sysScanner interface {
 	processes(pids []int32) map[int32]Process
 	traffic() (rx, tx uint64, ok bool)
 	method() string
+	perConnection() (ok bool, note string)
 }
 
 // Scanner reads the tables. Keep one for the life of the program: each
@@ -86,6 +94,10 @@ func (s *Scanner) Processes(pids []int32) map[int32]Process {
 func (s *Scanner) Traffic() (rx, tx uint64, ok bool) {
 	return s.sys.traffic()
 }
+
+// PerConnection says whether this system gives traffic per connection,
+// and if not (or only partly), why, in a line for the app.
+func (s *Scanner) PerConnection() (ok bool, note string) { return s.sys.perConnection() }
 
 // Method says how this system's table is read, for the About page.
 func (s *Scanner) Method() string { return s.sys.method() }

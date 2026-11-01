@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"time"
 )
 
 // macOS: the kernel hands out its socket tables through the sysctls
@@ -46,9 +47,18 @@ const (
 	soEPID    = 72
 	soMinLen  = 76
 
-	// Offset in struct xtcpcb_n.
+	// Offsets in struct xtcpcb_n. t_srtt is in milliseconds times 32
+	// (TCP_RTT_SHIFT 5, TCP_RETRANSHZ 1000).
 	tpState  = 36
 	tpMinLen = 40
+	tpSrtt   = 136
+
+	// struct xsockstat_n: after its length and kind, SO_TC_STATS_MAX (4)
+	// struct data_stats {rxpackets, rxbytes, txpackets, txbytes}, one per
+	// traffic class.
+	stFirst    = 8
+	stClasses  = 4
+	stClassLen = 32
 )
 
 var darwinStates = [...]string{Close, Listen, SynSent, SynRecv, Established, CloseWait, FinWait1, Closing, LastAck, FinWait2, TimeWait}
@@ -79,7 +89,7 @@ func parsePcblist(buf []byte, proto string) ([]Socket, error) {
 	}
 	var out []Socket
 	var which uint32
-	var inp, so, tp []byte
+	var inp, so, tp, st []byte
 	for off := roundup64(xigLen); off+8 <= len(buf); {
 		l := le.Uint32(buf[off:])
 		kind := le.Uint32(buf[off+4:])
@@ -97,6 +107,8 @@ func parsePcblist(buf []byte, proto string) ([]Socket, error) {
 				inp = rec
 			case xsoTcpcb:
 				tp = rec
+			case xsoStats:
+				st = rec
 			}
 		}
 		if which != want {
@@ -104,7 +116,10 @@ func parsePcblist(buf []byte, proto string) ([]Socket, error) {
 		}
 		which = 0
 		s, ok := pcbSocket(inp, so, tp, proto, gen)
-		inp, so, tp = nil, nil, nil
+		if ok {
+			s.Rx, s.Tx, s.HasBytes = sockStats(st)
+		}
+		inp, so, tp, st = nil, nil, nil, nil
 		if ok {
 			out = append(out, s)
 		}
@@ -150,9 +165,14 @@ func pcbSocket(inp, so, tp []byte, proto string, gen uint64) (Socket, bool) {
 		if len(tp) < tpMinLen {
 			return Socket{}, false
 		}
-		st := int32(le.Uint32(tp[tpState:]))
-		if st >= 0 && int(st) < len(darwinStates) {
-			s.State = darwinStates[st]
+		state := int32(le.Uint32(tp[tpState:]))
+		if state >= 0 && int(state) < len(darwinStates) {
+			s.State = darwinStates[state]
+		}
+		if len(tp) >= tpSrtt+4 {
+			if srtt := le.Uint32(tp[tpSrtt:]); srtt > 0 && srtt < 1<<30 {
+				s.RTT = time.Duration(srtt) * time.Millisecond / 32
+			}
 		}
 	} else if s.HasRemote() {
 		s.State = Established
@@ -160,6 +180,20 @@ func pcbSocket(inp, so, tp []byte, proto string, gen uint64) (Socket, bool) {
 		s.State = Listen
 	}
 	return s, true
+}
+
+// sockStats sums a socket's bytes over its traffic classes.
+func sockStats(st []byte) (rx, tx uint64, ok bool) {
+	le := binary.LittleEndian
+	if len(st) < stFirst+stClasses*stClassLen {
+		return 0, 0, false
+	}
+	for i := 0; i < stClasses; i++ {
+		c := st[stFirst+i*stClassLen:]
+		rx += le.Uint64(c[8:])
+		tx += le.Uint64(c[24:])
+	}
+	return rx, tx, true
 }
 
 // parseIfList2 sums the byte counters of a NET_RT_IFLIST2 routing dump

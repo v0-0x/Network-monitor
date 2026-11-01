@@ -32,6 +32,8 @@ type Settings struct {
 	ShowLocal    bool     `json:"showLocal"`    // list connections inside this computer and the home network too
 	LogDays      int      `json:"logDays"`      // how many days of logs to keep
 	GeoAuto      bool     `json:"geoAuto"`      // refresh the location databases monthly
+	PingHosts    bool     `json:"pingHosts"`    // ping every host on the internet now and then
+	Blocklists   bool     `json:"blocklists"`   // check addresses against public blocklists
 	Updates      Updates  `json:"updates"`
 }
 
@@ -43,6 +45,8 @@ func Defaults() Settings {
 		ResolveNames: true,
 		LogDays:      14,
 		GeoAuto:      true,
+		PingHosts:    true,
+		Blocklists:   true,
 		Updates:      Updates{Auto: true},
 	}
 }

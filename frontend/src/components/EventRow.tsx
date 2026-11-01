@@ -1,6 +1,6 @@
-import { ArrowDownLeft, ArrowUpRight, X, Radio, Info, AlertTriangle, CircleSlash } from "lucide-react"
+import { ArrowDownLeft, ArrowUpRight, X, Radio, Info, AlertTriangle, CircleSlash, ShieldAlert } from "lucide-react"
 import type { LogEvent } from "../lib/types"
-import { clock, duration, eventText } from "../lib/format"
+import { bytes, clock, duration, eventText } from "../lib/format"
 
 export function EventIcon({ e }: { e: LogEvent }) {
     const p = { size: 14, strokeWidth: 2 }
@@ -15,6 +15,8 @@ export function EventIcon({ e }: { e: LogEvent }) {
             return <CircleSlash {...p} className="k-unlisten" />
         case "error":
             return <AlertTriangle {...p} className="k-error" />
+        case "alert":
+            return <ShieldAlert {...p} className="k-alert" />
         default:
             return <Info {...p} className="k-note" />
     }
@@ -27,11 +29,15 @@ export function eventMeta(e: LogEvent): string {
         if (e.service) parts.push(e.service)
         if (e.org) parts.push(e.org)
         if (e.kind === "close" && e.dur) parts.push(`open ${duration(e.dur)}`)
+        if (e.kind === "close" && (e.rx || e.tx)) parts.push(`↓ ${bytes(e.rx ?? 0)} ↑ ${bytes(e.tx ?? 0)}`)
         if (e.existing) parts.push("already open at start")
     } else if (e.kind === "listen" || e.kind === "unlisten") {
         if (e.local) parts.push(e.local)
         if (e.scope === "public") parts.push("reachable from other computers")
         else if (e.scope === "loopback") parts.push("this computer only")
+    } else if (e.kind === "alert") {
+        if (e.msg) parts.push(e.msg)
+        if (e.org) parts.push(e.org)
     } else if (e.place) {
         parts.push(e.place)
     }

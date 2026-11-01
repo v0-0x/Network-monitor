@@ -38,6 +38,10 @@ export function OpenURL(arg1) {
   return window['go']['main']['App']['OpenURL'](arg1);
 }
 
+export function PingHost(arg1) {
+  return window['go']['main']['App']['PingHost'](arg1);
+}
+
 export function RestartToUpdate() {
   return window['go']['main']['App']['RestartToUpdate']();
 }
@@ -52,6 +56,10 @@ export function SearchLogs(arg1) {
 
 export function SkipVersion(arg1) {
   return window['go']['main']['App']['SkipVersion'](arg1);
+}
+
+export function UpdateBlocklists() {
+  return window['go']['main']['App']['UpdateBlocklists']();
 }
 
 export function UpdateGeo() {

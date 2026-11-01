@@ -31,12 +31,40 @@ export interface Conn {
     service?: string
     since: number
     existing?: boolean
+    hasBytes?: boolean
+    rx: number
+    tx: number
+    rxRate: number
+    txRate: number
+    rtt?: number
+}
+
+export interface PingResult {
+    sent: number
+    received: number
+    min: number
+    avg: number
+    max: number
+    method: "icmp" | "tcp"
+    at: number
+    error?: string
+}
+
+export type RiskLevel = "low" | "medium" | "high"
+
+export interface Risk {
+    score: number
+    level: RiskLevel
+    reasons: string[]
 }
 
 export interface Host extends Location {
     ip: string
     name?: string
     scope: "public" | "local" | "loopback"
+    ping?: PingResult
+    risk: Risk
+    listed?: string[]
 }
 
 export interface Listener {
@@ -81,9 +109,13 @@ export interface Snapshot {
     error?: string
     demo: boolean
     totals: Totals
+    perConn: boolean
+    perConnNote: string
+    icmp: boolean
+    icmpNote?: string
 }
 
-export type EventKind = "open" | "close" | "listen" | "unlisten" | "note" | "error"
+export type EventKind = "open" | "close" | "listen" | "unlisten" | "note" | "alert" | "error"
 
 export interface LogEvent {
     id: number
@@ -104,6 +136,9 @@ export interface LogEvent {
     scope?: string
     dur?: number
     existing?: boolean
+    rx?: number
+    tx?: number
+    risk?: number
     msg?: string
 }
 
@@ -138,11 +173,18 @@ export interface UpdateState {
     manual?: string
 }
 
+export interface BlocklistStatus {
+    lists: { name: string; entries: number }[] | null
+    updated: string
+    error?: string
+}
+
 export interface Tick {
     snapshot: Snapshot
     events: LogEvent[] | null
     geo: GeoStatus
     update: UpdateState
+    blocklists: BlocklistStatus
 }
 
 export interface Info {
@@ -163,6 +205,8 @@ export interface Settings {
     showLocal: boolean
     logDays: number
     geoAuto: boolean
+    pingHosts: boolean
+    blocklists: boolean
     updates: { auto: boolean; beta: boolean; betaChosen: boolean; skip: string }
 }
 

@@ -128,3 +128,76 @@ func TestAppBundleName(t *testing.T) {
 		t.Errorf("cleanName = %q", got)
 	}
 }
+
+// TestCountsBytes sends data over a connection and checks the scanner sees
+// it, where the system counts traffic per connection.
+func TestCountsBytes(t *testing.T) {
+	s := NewScanner()
+	if _, err := s.Sockets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, note := s.PerConnection(); !ok {
+		t.Skipf("no traffic per connection here: %s", note)
+	}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan int64, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 64*1024)
+		var n int64
+		for n < 300000 {
+			k, err := c.Read(buf)
+			n += int64(k)
+			if err != nil {
+				break
+			}
+		}
+		got <- n
+		time.Sleep(3 * time.Second)
+	}()
+	c, err := net.Dial("tcp4", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// Seen once before the data goes: Windows starts counting from there.
+	time.Sleep(100 * time.Millisecond)
+	if _, err := s.Sockets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, note := s.PerConnection(); !ok {
+		t.Skipf("no traffic per connection here: %s", note)
+	}
+	if _, err := c.Write(make([]byte, 300000)); err != nil {
+		t.Fatal(err)
+	}
+	<-got
+	port := uint16(c.LocalAddr().(*net.TCPAddr).Port)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		socks, _ := s.Sockets(context.Background())
+		for _, so := range socks {
+			if so.Proto == "tcp" && so.Local.Port() == port && so.HasBytes && so.Tx >= 300000 {
+				t.Logf("sent %d, received %d, rtt %v", so.Tx, so.Rx, so.RTT)
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			for _, so := range socks {
+				if so.Local.Port() == port {
+					t.Fatalf("the connection's traffic wasn't counted: %+v", so)
+				}
+			}
+			t.Fatal("connection not found")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

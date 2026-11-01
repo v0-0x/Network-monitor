@@ -108,6 +108,8 @@ export function eventText(e: LogEvent): string {
             return `${who} opened port ${e.port}${e.proto ? "/" + e.proto.toUpperCase() : ""}${e.service ? ` (${e.service})` : ""}`
         case "unlisten":
             return `${who} closed port ${e.port}${e.proto ? "/" + e.proto.toUpperCase() : ""}`
+        case "alert":
+            return `High risk (${e.risk ?? "?"}): ${e.host || e.ip}${e.place ? ` (${e.place})` : ""}${e.process ? `, used by ${e.process}` : ""}`
         default:
             return e.msg || ""
     }
@@ -126,4 +128,17 @@ export function eventMatches(e: LogEvent, text: string, kinds: string[]): boolea
     const dir = e.dir === "in" ? "incoming" : e.dir === "out" ? "outgoing" : ""
     const hay = [e.kind, dir, e.proto, e.process, e.local, e.ip, String(e.port ?? ""), e.service, e.host, e.place, e.cc, e.org, e.msg].join(" ").toLowerCase()
     return words.every(w => hay.includes(w))
+}
+
+export function ms(v?: number): string {
+    if (v === undefined || !isFinite(v)) return "—"
+    if (v < 1) return "<1 ms"
+    if (v < 10) return `${v.toFixed(1)} ms`
+    return `${Math.round(v)} ms`
+}
+
+export const riskName: Record<string, string> = { low: "Low", medium: "Medium", high: "High" }
+
+export function riskLevel(score: number): "low" | "medium" | "high" {
+    return score >= 50 ? "high" : score >= 20 ? "medium" : "low"
 }

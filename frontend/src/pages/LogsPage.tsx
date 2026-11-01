@@ -12,6 +12,7 @@ const KINDS: { id: string; label: string; kinds: string[] }[] = [
     { id: "open", label: "Opened", kinds: ["open"] },
     { id: "close", label: "Closed", kinds: ["close"] },
     { id: "ports", label: "Ports", kinds: ["listen", "unlisten"] },
+    { id: "alerts", label: "Risks", kinds: ["alert"] },
     { id: "notes", label: "Notes", kinds: ["note", "error"] },
 ]
 

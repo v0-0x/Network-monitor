@@ -2,7 +2,7 @@
 // the page's own types.
 import * as Go from "../wailsjs/go/main/App"
 import { EventsOn } from "../wailsjs/runtime/runtime"
-import type { Info, LogDay, LogPage, LogQuery, Settings, Tick, UpdateState } from "./types"
+import type { Info, LogDay, LogPage, LogQuery, PingResult, Settings, Tick, UpdateState } from "./types"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const call = <T,>(p: Promise<any>) => p as Promise<T>
@@ -22,6 +22,8 @@ export const api = {
     installUpdate: () => call<void>(Go.InstallUpdate()),
     restartToUpdate: () => call<void>(Go.RestartToUpdate()),
     skipVersion: (v: string) => call<void>(Go.SkipVersion(v)),
+    pingHost: (ip: string) => call<PingResult>(Go.PingHost(ip)),
+    updateBlocklists: () => call<void>(Go.UpdateBlocklists()),
 }
 
 export function onTick(f: (t: Tick) => void) {

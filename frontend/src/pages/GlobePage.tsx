@@ -19,6 +19,8 @@ export function GlobePage({ active, goto }: { active: boolean; goto: (p: Page) =
     const publicConns = publicGroups.reduce((n, g) => n + g.conns.length, 0)
     const recent = useMemo(() => events.slice(-200).reverse(), [events])
     const located = publicGroups.filter(g => g.host?.hasCoords).length
+    const risky = publicGroups.filter(g => g.host?.risk && g.host.risk.level !== "low")
+    const high = risky.filter(g => g.host?.risk.level === "high").length
 
     const pick = (ip: string | null) => {
         select(ip)
@@ -36,6 +38,12 @@ export function GlobePage({ active, goto }: { active: boolean; goto: (p: Page) =
                     <Stat v={count(countries)} l="Countries" />
                     <Stat v={bytesRate(snap?.rx ?? 0)} l="Download" />
                     <Stat v={bytesRate(snap?.tx ?? 0)} l="Upload" />
+                    {risky.length > 0 && (
+                        <button className={"stat stat-btn " + (high ? "high" : "medium")} onClick={() => pick(risky[0].ip)} title="Show the riskiest host">
+                            <span className="v">{count(risky.length)}</span>
+                            <span className="l">At risk</span>
+                        </button>
+                    )}
                 </div>
                 <div className="me-chip">
                     {snap?.demo && <span className="demo-tag">Demo data</span>}
@@ -103,6 +111,9 @@ export function GlobePage({ active, goto }: { active: boolean; goto: (p: Page) =
                         </div>
                         <div className="item">
                             <span className="line in" /> Incoming: they connected to you
+                        </div>
+                        <div className="item">
+                            <span className="line risk" /> Medium or high risk
                         </div>
                         {located < publicGroups.length && geo?.ready && <div className="subtle">{publicGroups.length - located} not on the map (no location known)</div>}
                         <button className="link credit" onClick={() => api.openURL("https://db-ip.com")}>

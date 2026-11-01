@@ -32,6 +32,7 @@ type linuxScanner struct {
 	owner   map[uint64]int32     // socket inode -> pid
 	unowned map[uint64]time.Time // inodes no readable process has (other users')
 	names   map[int32]cachedProc
+	diagErr error
 }
 
 func newSysScanner() sysScanner {
@@ -108,14 +109,28 @@ func (l *linuxScanner) sockets(ctx context.Context) ([]Socket, error) {
 			delete(l.owner, ino)
 		}
 	}
+	stats, derr := tcpDiag()
+	l.diagErr = derr
 	out := make([]Socket, 0, len(all))
 	for _, s := range all {
 		if s.inode != 0 {
 			s.PID = l.owner[s.inode]
+			if st, ok := stats[s.inode]; ok && s.Proto == "tcp" {
+				s.Rx, s.Tx, s.RTT, s.HasBytes = st.rx, st.tx, st.rtt, true
+			}
 		}
 		out = append(out, s.Socket)
 	}
 	return out, nil
+}
+
+func (l *linuxScanner) perConnection() (bool, string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.diagErr != nil {
+		return false, "The kernel's socket statistics (sock_diag) aren't available: " + l.diagErr.Error()
+	}
+	return true, "Traffic is counted for TCP connections; Linux doesn't count it for UDP (QUIC)."
 }
 
 // walkFDs maps socket inodes to the processes that have them open.

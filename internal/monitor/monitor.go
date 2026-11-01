@@ -19,8 +19,10 @@ import (
 	"github.com/v0-0x/Network-monitor/internal/geo"
 	"github.com/v0-0x/Network-monitor/internal/logs"
 	"github.com/v0-0x/Network-monitor/internal/netstat"
+	"github.com/v0-0x/Network-monitor/internal/ping"
 	"github.com/v0-0x/Network-monitor/internal/publicip"
 	"github.com/v0-0x/Network-monitor/internal/rdns"
+	"github.com/v0-0x/Network-monitor/internal/risk"
 	"github.com/v0-0x/Network-monitor/internal/settings"
 )
 
@@ -41,6 +43,15 @@ type Conn struct {
 	Service    string `json:"service,omitempty"`
 	Since      int64  `json:"since"` // Unix ms when first seen
 	Existing   bool   `json:"existing,omitempty"`
+
+	// Traffic, where the system counts it (Snapshot.PerConn): bytes so
+	// far, and bytes per second over the last scan.
+	HasBytes bool    `json:"hasBytes,omitempty"`
+	Rx       uint64  `json:"rx"`
+	Tx       uint64  `json:"tx"`
+	RxRate   float64 `json:"rxRate"`
+	TxRate   float64 `json:"txRate"`
+	RTT      float64 `json:"rtt,omitempty"` // the system's smoothed round-trip time, ms
 }
 
 // Host is what is known about a remote address.
@@ -49,6 +60,9 @@ type Host struct {
 	Name  string `json:"name,omitempty"` // reverse DNS
 	Scope string `json:"scope"`
 	geo.Location
+	Ping   *ping.Result    `json:"ping,omitempty"` // the last ping check
+	Risk   risk.Assessment `json:"risk"`
+	Listed []string        `json:"listed,omitempty"` // blocklists it's on
 }
 
 // Listener is a port this computer offers.
@@ -98,6 +112,11 @@ type Snapshot struct {
 	Error     string          `json:"error,omitempty"`
 	Demo      bool            `json:"demo"`
 	Totals    Totals          `json:"totals"`
+
+	PerConn     bool   `json:"perConn"`     // traffic per connection is counted
+	PerConnNote string `json:"perConnNote"` // and what to know about it
+	ICMP        bool   `json:"icmp"`        // ping checks can use ICMP
+	ICMPNote    string `json:"icmpNote,omitempty"`
 }
 
 type source interface {
@@ -105,18 +124,21 @@ type source interface {
 	Processes(pids []int32) map[int32]netstat.Process
 	Traffic() (rx, tx uint64, ok bool)
 	Method() string
+	PerConnection() (bool, string)
 }
 
 type tracked struct {
 	Conn
 	logged   bool
 	openedAt time.Time
+	bytesAt  time.Time // when Rx and Tx were last read
 }
 
 // Options configure a Monitor.
 type Options struct {
 	Settings   *settings.Store
 	Geo        *geo.DB
+	Blocklists *risk.Blocklists
 	Logs       *logs.Store
 	OnSnapshot func(Snapshot)
 	Demo       bool
@@ -147,6 +169,12 @@ type Monitor struct {
 	wake      chan struct{}
 	relocate  chan struct{}
 	ifaces    string
+
+	pings    map[string]ping.Result // by IP
+	pinging  map[string]bool
+	icmpOK   bool
+	icmpNote string
+	alerted  map[string]bool // hosts already logged as high risk
 }
 
 // New returns a Monitor.
@@ -161,9 +189,16 @@ func New(opt Options) *Monitor {
 		countries: map[string]bool{},
 		wake:      make(chan struct{}, 1),
 		relocate:  make(chan struct{}, 1),
+		pings:     map[string]ping.Result{},
+		pinging:   map[string]bool{},
+		icmpOK:    true,
+		alerted:   map[string]bool{},
 	}
 	if opt.Demo {
 		m.src = newDemoSource()
+		if opt.Blocklists != nil {
+			opt.Blocklists.AddDemo(netip.MustParseAddr(demoListed), risk.Lists[0])
+		}
 	} else {
 		m.src = netstat.NewScanner()
 	}
@@ -174,6 +209,7 @@ func New(opt Options) *Monitor {
 func (m *Monitor) Run(ctx context.Context) {
 	go m.locateLoop(ctx)
 	go m.geoLoop(ctx)
+	go m.blocklistLoop(ctx)
 	m.opt.Logs.Prune(m.opt.Settings.Get().LogDays)
 	prune := time.NewTicker(time.Hour)
 	defer prune.Stop()
@@ -338,6 +374,18 @@ func (m *Monitor) scan(ctx context.Context) {
 			if p.Name != "" {
 				t.Process, t.Exe = p.Name, p.Exe
 			}
+			if s.HasBytes {
+				if t.HasBytes && !t.bytesAt.IsZero() && s.Rx >= t.Rx && s.Tx >= t.Tx {
+					if dt := now.Sub(t.bytesAt).Seconds(); dt > 0 {
+						t.RxRate = float64(s.Rx-t.Rx) / dt
+						t.TxRate = float64(s.Tx-t.Tx) / dt
+					}
+				}
+				t.Rx, t.Tx, t.HasBytes, t.bytesAt = s.Rx, s.Tx, true, now
+			}
+			if s.RTT > 0 {
+				t.RTT = float64(s.RTT.Microseconds()) / 1000
+			}
 		}
 
 		// Hosts, with their places and names.
@@ -350,6 +398,38 @@ func (m *Monitor) scan(ctx context.Context) {
 				continue
 			}
 			hosts[t.RemoteIP] = m.host(t.RemoteIP, t.Scope, set.ResolveNames)
+		}
+
+		// Risk and ping results.
+		byHost := map[string][]risk.Conn{}
+		for _, t := range m.conns {
+			if seen[t.ID] {
+				byHost[t.RemoteIP] = append(byHost[t.RemoteIP], risk.Conn{Proto: t.Proto, Dir: t.Dir, LocalPort: t.LocalPort, RemotePort: t.RemotePort, Process: t.Process, Exe: t.Exe, PID: t.PID})
+			}
+		}
+		for ip, h := range hosts {
+			in := risk.Host{Public: h.Scope == ScopePublic, Name: h.Name, Org: h.Org, Conns: byHost[ip]}
+			if in.Public && set.Blocklists && m.opt.Blocklists != nil {
+				if a, err := netip.ParseAddr(ip); err == nil {
+					in.Listed = m.opt.Blocklists.Lookup(a)
+					for _, l := range in.Listed {
+						h.Listed = append(h.Listed, l.Name)
+					}
+				}
+			}
+			h.Risk = risk.Assess(in)
+			if r, ok := m.pings[ip]; ok {
+				r := r
+				h.Ping = &r
+			}
+			hosts[ip] = h
+			if h.Risk.Level == risk.High && !m.alerted[ip] {
+				m.alerted[ip] = true
+				events = append(events, alertEvent(ip, h, byHost[ip], nowMs))
+			}
+		}
+		if set.PingHosts {
+			m.queuePings(ctx, hosts, now)
 		}
 
 		// Log what opened (once its name is known, or after 3 s) and closed.
@@ -370,6 +450,7 @@ func (m *Monitor) scan(ctx context.Context) {
 					h := m.host(t.RemoteIP, t.Scope, false)
 					e := connEvent(logs.Closed, t, h, nowMs)
 					e.Duration = nowMs - t.Since
+					e.Rx, e.Tx = t.Rx, t.Tx
 					events = append(events, e)
 				}
 				delete(m.conns, k)
@@ -450,6 +531,8 @@ func (m *Monitor) scan(ctx context.Context) {
 			Demo:      m.opt.Demo,
 			Conns:     make([]Conn, 0, len(m.conns)),
 			Listeners: make([]Listener, 0, len(curListen)),
+			ICMP:      m.icmpOK,
+			ICMPNote:  m.icmpNote,
 			Totals: Totals{
 				Since:     m.started.UnixMilli(),
 				Opened:    m.opened,
@@ -461,6 +544,7 @@ func (m *Monitor) scan(ctx context.Context) {
 		if err != nil {
 			snap.Error = err.Error()
 		}
+		snap.PerConn, snap.PerConnNote = m.src.PerConnection()
 		for _, t := range m.conns {
 			snap.Conns = append(snap.Conns, t.Conn)
 		}

@@ -19,6 +19,8 @@ import (
 	"github.com/v0-0x/Network-monitor/internal/logs"
 	"github.com/v0-0x/Network-monitor/internal/monitor"
 	"github.com/v0-0x/Network-monitor/internal/paths"
+	"github.com/v0-0x/Network-monitor/internal/ping"
+	"github.com/v0-0x/Network-monitor/internal/risk"
 	"github.com/v0-0x/Network-monitor/internal/settings"
 	"github.com/v0-0x/Network-monitor/internal/update"
 )
@@ -32,6 +34,7 @@ type App struct {
 
 	settings *settings.Store
 	geo      *geo.DB
+	lists    *risk.Blocklists
 	logs     *logs.Store
 	mon      *monitor.Monitor
 	upd      *update.Updater
@@ -54,10 +57,11 @@ type Info struct {
 
 // Tick is sent to the page after every scan.
 type Tick struct {
-	Snapshot monitor.Snapshot `json:"snapshot"`
-	Events   []logs.Event     `json:"events"`
-	Geo      geo.Status       `json:"geo"`
-	Update   update.State     `json:"update"`
+	Snapshot   monitor.Snapshot `json:"snapshot"`
+	Events     []logs.Event     `json:"events"`
+	Geo        geo.Status       `json:"geo"`
+	Update     update.State     `json:"update"`
+	Blocklists risk.Status      `json:"blocklists"`
 }
 
 // NewApp opens everything; startup starts it.
@@ -69,6 +73,7 @@ func NewApp(demo bool) (*App, error) {
 	a := &App{demo: demo}
 	a.settings = settings.Load(filepath.Join(dir, "settings.json"))
 	a.geo = geo.Open(paths.Sub("geo"))
+	a.lists = risk.OpenBlocklists(paths.Sub("blocklists"))
 	lg, err := logs.Open(paths.Sub("logs"))
 	if err != nil {
 		return nil, err
@@ -98,6 +103,7 @@ func (a *App) startup(ctx context.Context) {
 	a.mon = monitor.New(monitor.Options{
 		Settings:   a.settings,
 		Geo:        a.geo,
+		Blocklists: a.lists,
 		Logs:       a.logs,
 		Demo:       a.demo,
 		OnSnapshot: a.emit,
@@ -134,7 +140,7 @@ func (a *App) emit(s monitor.Snapshot) {
 	if events == nil {
 		events = []logs.Event{}
 	}
-	wruntime.EventsEmit(a.ctx, "tick", Tick{Snapshot: s, Events: events, Geo: a.geo.Status(), Update: a.upd.State()})
+	wruntime.EventsEmit(a.ctx, "tick", Tick{Snapshot: s, Events: events, Geo: a.geo.Status(), Update: a.upd.State(), Blocklists: a.lists.Status()})
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -167,7 +173,7 @@ func (a *App) GetTick() Tick {
 	if a.mon != nil {
 		s = a.mon.Last()
 	}
-	return Tick{Snapshot: s, Events: a.logs.Recent(300), Geo: a.geo.Status(), Update: a.upd.State()}
+	return Tick{Snapshot: s, Events: a.logs.Recent(300), Geo: a.geo.Status(), Update: a.upd.State(), Blocklists: a.lists.Status()}
 }
 
 // GetSettings returns the settings.
@@ -246,6 +252,19 @@ func (a *App) OpenURL(u string) error {
 // UpdateGeo downloads the newest location databases (in the background).
 func (a *App) UpdateGeo() {
 	go func() { _ = a.mon.UpdateGeo(a.ctx) }()
+}
+
+// PingHost checks how long a host takes to answer (ICMP, or else the time
+// to open a TCP connection).
+func (a *App) PingHost(ip string) (ping.Result, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
+	defer cancel()
+	return a.mon.Ping(ctx, ip)
+}
+
+// UpdateBlocklists downloads the blocklists now (in the background).
+func (a *App) UpdateBlocklists() {
+	go func() { _ = a.mon.UpdateBlocklists(a.ctx) }()
 }
 
 // CheckForUpdates looks for a new version now.

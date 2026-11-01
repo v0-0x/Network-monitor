@@ -28,6 +28,7 @@ func (f *fakeSource) Processes(pids []int32) map[int32]netstat.Process {
 }
 func (f *fakeSource) Traffic() (uint64, uint64, bool) { return 0, 0, false }
 func (f *fakeSource) Method() string                  { return "fake" }
+func (f *fakeSource) PerConnection() (bool, string)   { return true, "" }
 
 func sock(proto, local, remote, state string, pid int32) netstat.Socket {
 	s := netstat.Socket{Proto: proto, Local: netip.MustParseAddrPort(local), State: state, PID: pid}

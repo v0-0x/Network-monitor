@@ -23,16 +23,61 @@ type windowsScanner struct {
 	names  map[int32]cachedProc
 	snapAt time.Time
 	snap   map[int32]string
+
+	denied  bool            // not administrator: no traffic per connection
+	enabled map[string]bool // connections whose counters are switched on
 }
 
 func newSysScanner() sysScanner {
-	return &windowsScanner{names: map[int32]cachedProc{}}
+	return &windowsScanner{names: map[int32]cachedProc{}, enabled: map[string]bool{}}
+}
+
+func (w *windowsScanner) perConnection() (bool, string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.denied {
+		return false, "Windows only counts traffic per connection for administrators: open Network Monitor with Run as administrator to see it."
+	}
+	return true, "Counted from when Network Monitor first saw each connection; Windows doesn't count UDP."
 }
 
 func (w *windowsScanner) method() string { return "GetExtendedTcpTable" }
 
 func (w *windowsScanner) sockets(ctx context.Context) ([]Socket, error) {
-	return gopsutilConnections(ctx)
+	socks, err := gopsutilConnections(ctx)
+	if err != nil {
+		return socks, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.denied {
+		return socks, nil
+	}
+	seen := map[string]bool{}
+	for i := range socks {
+		s := &socks[i]
+		if s.Proto != "tcp" || s.State != Established || !s.HasRemote() {
+			continue
+		}
+		k := s.Local.String() + "|" + s.Remote.String()
+		seen[k] = true
+		rx, tx, errno := estats(*s, !w.enabled[k])
+		if errno == uintptr(windows.ERROR_ACCESS_DENIED) {
+			w.denied = true
+			return socks, nil
+		}
+		if errno != 0 {
+			continue
+		}
+		w.enabled[k] = true
+		s.Rx, s.Tx, s.HasBytes = rx, tx, true
+	}
+	for k := range w.enabled {
+		if !seen[k] {
+			delete(w.enabled, k)
+		}
+	}
+	return socks, nil
 }
 
 func (w *windowsScanner) traffic() (rx, tx uint64, ok bool) { return gopsutilTraffic() }

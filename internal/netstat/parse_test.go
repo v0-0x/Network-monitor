@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 // pcbRecord builds one record of a pcblist_n buffer, padded to 8 bytes.
@@ -35,7 +36,12 @@ func TestParsePcblist(t *testing.T) {
 		})...)
 		buf = append(buf, pcbRecord(xsoRcvbuf, 32, nil)...)
 		buf = append(buf, pcbRecord(xsoSndbuf, 32, nil)...)
-		buf = append(buf, pcbRecord(xsoStats, 168, nil)...)
+		buf = append(buf, pcbRecord(xsoStats, 136, func(b []byte) {
+			for i := 0; i < 4; i++ {
+				le.PutUint64(b[8+i*32+8:], 1000) // rxbytes
+				le.PutUint64(b[8+i*32+24:], 10)  // txbytes
+			}
+		})...)
 		buf = append(buf, pcbRecord(xsoInpcb, 104, func(b []byte) {
 			binary.BigEndian.PutUint16(b[inpFport:], fport)
 			binary.BigEndian.PutUint16(b[inpLport:], lport)
@@ -52,7 +58,10 @@ func TestParsePcblist(t *testing.T) {
 				copy(b[inpFaddr:], f6[:])
 			}
 		})...)
-		buf = append(buf, pcbRecord(xsoTcpcb, 208, func(b []byte) { le.PutUint32(b[tpState:], state) })...)
+		buf = append(buf, pcbRecord(xsoTcpcb, 208, func(b []byte) {
+			le.PutUint32(b[tpState:], state)
+			le.PutUint32(b[tpSrtt:], 25*32) // 25 ms
+		})...)
 	}
 	sock(true, netip.MustParseAddr("192.168.1.20"), netip.MustParseAddr("17.253.144.10"), 50000, 443, 321, 0, 4, 90)
 	sock(false, netip.MustParseAddr("::"), netip.IPv6Unspecified(), 7000, 0, 55, 66, 1, 91)
@@ -71,6 +80,9 @@ func TestParsePcblist(t *testing.T) {
 	a := socks[0]
 	if a.Local != netip.MustParseAddrPort("192.168.1.20:50000") || a.Remote != netip.MustParseAddrPort("17.253.144.10:443") || a.PID != 321 || a.State != Established {
 		t.Errorf("v4 socket: %+v", a)
+	}
+	if !a.HasBytes || a.Rx != 4000 || a.Tx != 40 || a.RTT != 25*time.Millisecond {
+		t.Errorf("v4 socket's stats: %+v", a)
 	}
 	b := socks[1]
 	if b.Local.Port() != 7000 || b.State != Listen || b.PID != 66 || !b.Local.Addr().Is6() {

@@ -4,6 +4,7 @@ import {update} from '../models';
 import {logs} from '../models';
 import {main} from '../models';
 import {settings} from '../models';
+import {ping} from '../models';
 
 export function CheckForUpdates():Promise<update.State>;
 
@@ -23,6 +24,8 @@ export function OpenLogsFolder():Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
+export function PingHost(arg1:string):Promise<ping.Result>;
+
 export function RestartToUpdate():Promise<void>;
 
 export function SaveSettings(arg1:settings.Settings):Promise<settings.Settings>;
@@ -30,5 +33,7 @@ export function SaveSettings(arg1:settings.Settings):Promise<settings.Settings>;
 export function SearchLogs(arg1:logs.Query):Promise<logs.Page>;
 
 export function SkipVersion(arg1:string):Promise<void>;
+
+export function UpdateBlocklists():Promise<void>;
 
 export function UpdateGeo():Promise<void>;

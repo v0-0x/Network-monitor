@@ -91,6 +91,9 @@ export namespace logs {
 	    scope?: string;
 	    dur?: number;
 	    existing?: boolean;
+	    rx?: number;
+	    tx?: number;
+	    risk?: number;
 	    msg?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -117,6 +120,9 @@ export namespace logs {
 	        this.scope = source["scope"];
 	        this.dur = source["dur"];
 	        this.existing = source["existing"];
+	        this.rx = source["rx"];
+	        this.tx = source["tx"];
+	        this.risk = source["risk"];
 	        this.msg = source["msg"];
 	    }
 	}
@@ -210,6 +216,7 @@ export namespace main {
 	    events: logs.Event[];
 	    geo: geo.Status;
 	    update: update.State;
+	    blocklists: risk.Status;
 	
 	    static createFrom(source: any = {}) {
 	        return new Tick(source);
@@ -221,6 +228,7 @@ export namespace main {
 	        this.events = this.convertValues(source["events"], logs.Event);
 	        this.geo = this.convertValues(source["geo"], geo.Status);
 	        this.update = this.convertValues(source["update"], update.State);
+	        this.blocklists = this.convertValues(source["blocklists"], risk.Status);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -262,6 +270,12 @@ export namespace monitor {
 	    service?: string;
 	    since: number;
 	    existing?: boolean;
+	    hasBytes?: boolean;
+	    rx: number;
+	    tx: number;
+	    rxRate: number;
+	    txRate: number;
+	    rtt?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conn(source);
@@ -284,6 +298,12 @@ export namespace monitor {
 	        this.service = source["service"];
 	        this.since = source["since"];
 	        this.existing = source["existing"];
+	        this.hasBytes = source["hasBytes"];
+	        this.rx = source["rx"];
+	        this.tx = source["tx"];
+	        this.rxRate = source["rxRate"];
+	        this.txRate = source["txRate"];
+	        this.rtt = source["rtt"];
 	    }
 	}
 	export class Host {
@@ -301,6 +321,9 @@ export namespace monitor {
 	    postcode?: string;
 	    asn?: number;
 	    org?: string;
+	    ping?: ping.Result;
+	    risk: risk.Assessment;
+	    listed?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Host(source);
@@ -322,7 +345,28 @@ export namespace monitor {
 	        this.postcode = source["postcode"];
 	        this.asn = source["asn"];
 	        this.org = source["org"];
+	        this.ping = this.convertValues(source["ping"], ping.Result);
+	        this.risk = this.convertValues(source["risk"], risk.Assessment);
+	        this.listed = source["listed"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Listener {
 	    proto: string;
@@ -369,6 +413,7 @@ export namespace monitor {
 	    asn?: number;
 	    org?: string;
 	    error?: string;
+	    waiting?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Me(source);
@@ -392,6 +437,7 @@ export namespace monitor {
 	        this.asn = source["asn"];
 	        this.org = source["org"];
 	        this.error = source["error"];
+	        this.waiting = source["waiting"];
 	    }
 	}
 	export class Totals {
@@ -427,6 +473,10 @@ export namespace monitor {
 	    error?: string;
 	    demo: boolean;
 	    totals: Totals;
+	    perConn: boolean;
+	    perConnNote: string;
+	    icmp: boolean;
+	    icmpNote?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
@@ -446,6 +496,111 @@ export namespace monitor {
 	        this.error = source["error"];
 	        this.demo = source["demo"];
 	        this.totals = this.convertValues(source["totals"], Totals);
+	        this.perConn = source["perConn"];
+	        this.perConnNote = source["perConnNote"];
+	        this.icmp = source["icmp"];
+	        this.icmpNote = source["icmpNote"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace ping {
+	
+	export class Result {
+	    sent: number;
+	    received: number;
+	    min: number;
+	    avg: number;
+	    max: number;
+	    method: string;
+	    at: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sent = source["sent"];
+	        this.received = source["received"];
+	        this.min = source["min"];
+	        this.avg = source["avg"];
+	        this.max = source["max"];
+	        this.method = source["method"];
+	        this.at = source["at"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace risk {
+	
+	export class Assessment {
+	    score: number;
+	    level: string;
+	    reasons: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Assessment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.score = source["score"];
+	        this.level = source["level"];
+	        this.reasons = source["reasons"];
+	    }
+	}
+	export class ListStatus {
+	    name: string;
+	    entries: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.entries = source["entries"];
+	    }
+	}
+	export class Status {
+	    lists: ListStatus[];
+	    // Go type: time
+	    updated: any;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.lists = this.convertValues(source["lists"], ListStatus);
+	        this.updated = this.convertValues(source["updated"], null);
+	        this.error = source["error"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -514,6 +669,8 @@ export namespace settings {
 	    showLocal: boolean;
 	    logDays: number;
 	    geoAuto: boolean;
+	    pingHosts: boolean;
+	    blocklists: boolean;
 	    updates: Updates;
 	
 	    static createFrom(source: any = {}) {
@@ -528,6 +685,8 @@ export namespace settings {
 	        this.showLocal = source["showLocal"];
 	        this.logDays = source["logDays"];
 	        this.geoAuto = source["geoAuto"];
+	        this.pingHosts = source["pingHosts"];
+	        this.blocklists = source["blocklists"];
 	        this.updates = this.convertValues(source["updates"], Updates);
 	    }
 	

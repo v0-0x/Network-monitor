@@ -34,6 +34,13 @@ func (d *darwinScanner) method() string {
 	return "sysctl pcblist_n"
 }
 
+func (d *darwinScanner) perConnection() (bool, string) {
+	if d.useLsof {
+		return false, "macOS's socket lists couldn't be read, so lsof is used, which doesn't count traffic."
+	}
+	return true, ""
+}
+
 func (d *darwinScanner) sockets(ctx context.Context) ([]Socket, error) {
 	if !d.useLsof {
 		var out []Socket

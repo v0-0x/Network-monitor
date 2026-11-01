@@ -8,13 +8,16 @@
 
 ## What it does
 
-- **A live globe.** A line runs from every address your computer is connected to, to where you are. A light travels along it in the direction the connection was opened: white for connections you made, amber for ones others made to you (a server you run, a game you host).
-- **Hover a line (or its dot)** to see who it is: the host name, the network that owns the address (Google LLC, Cloudflare, your ISP…) and its AS number, the city, region and country, coordinates, time zone and distance from you, the program on your computer that holds the connection (and its PID), the ports and service, and how long it's been open. Click to pick it and fly there.
+- **A live globe.** A line runs from every address your computer is connected to, to where you are. A light travels along it in the direction the connection was opened: white for connections you made, blue for ones others made to you (a server you run, a game you host), amber and red for medium and high risk. Busier connections draw thicker lines.
+- **Hover a line (or its dot)** to see who it is: the host name, the network that owns the address (Google LLC, Cloudflare, your ISP…) and its AS number, the city, region and country, coordinates, time zone and distance from you, the program on your computer that holds the connection (and its PID), the ports and service, how long it's been open, how much it has downloaded and uploaded and how fast right now, its latency, and its risk score with the reasons. Click to pick it and fly there.
 
   ![Hovering a line](docs/hover.png)
 
 - **Connected now:** the hosts you're connected to, newest first, with the details a click away.
-- **Connections:** every open connection in a table you can sort and filter (program, address, country, network, port, direction), and **Open ports**: what this computer offers to others, by which program and whether it's reachable from other computers or only this one.
+- **Connections:** every open connection in a table you can sort and filter (program, address, country, network, port, direction, traffic, latency, risk); **Programs**: what each program is connected to and how much it downloads and uploads; and **Open ports**: what this computer offers to others, by which program and whether it's reachable from other computers or only this one (remote-access and database ports open to every network are marked).
+- **Traffic per connection:** bytes down and up for every connection and its speed right now, added up per host and per program.
+- **Ping checks:** every host on the internet is pinged when it's first seen and then once a minute (3 small ICMP packets), and each TCP connection's own round-trip time comes from the system. A **Ping** button checks one host on demand (timing a TCP connection when ping isn't allowed or answered).
+- **Risk score:** each host gets 0–100 with its reasons: on a public blocklist (FireHOL level 1, abuse.ch's Feodo Tracker of botnet servers), someone on the internet connecting in (more so to SSH, Remote Desktop, SMB or a database), unencrypted protocols, ports malware likes, a program running from a temporary or downloads folder. High-risk hosts turn red and are logged. It's a hint where to look, not a verdict, and an address's country doesn't count.
 - **Logs:** every connection opened and closed (with how long it was open), every port opened and closed, your public address changing (a VPN connecting), kept one file per day for as long as you choose. Search them, filter by kind, and export a day as CSV.
 - **Traffic:** download and upload speed of the whole computer.
 - **Updates itself** from this repository's releases, with a beta channel (below).
@@ -26,6 +29,8 @@ One program, one window: nothing runs in the background, nothing listens on a po
 - Addresses are placed on the map **offline**, from [DB-IP](https://db-ip.com)'s free Lite databases (City and ASN, CC BY 4.0). They're downloaded on the first start (about 75 MB) and refreshed once a month. No address you connect to is sent anywhere to be looked up.
 - To place **you**, the app asks a public service (ipify; if it doesn't answer, checkip.amazonaws.com, icanhazip.com or ifconfig.me) for your public address once every 10 minutes, and looks that up offline too. You can set your location by hand in Settings instead; then nothing is asked.
 - Host names come from your own DNS server (reverse DNS), the same as `netstat` without `-n`. It can be turned off.
+- The blocklists are downloaded whole (twice a day), so nothing about your connections is sent to check them. Both can be turned off.
+- Pings go only to hosts you're already connected to. They can be turned off.
 - The log stays on your computer.
 
 ## Install
@@ -80,6 +85,8 @@ No packet capture and no administrator rights: the app reads the system's own co
 
 What that means:
 
+- Traffic per connection: Linux counts it for TCP (sock_diag, like `ss -ti`), macOS for TCP and UDP. Windows only counts it for administrators: open the app with *Run as administrator* to see it.
+- Ping: Linux allows ICMP for users when `net.ipv4.ping_group_range` includes them (systemd sets that on Arch); macOS and Windows always do.
 - A connection that opens and closes between two reads (well under a second) can be missed.
 - Without administrator rights, connections of other users' programs (on Linux: root's, such as `sshd`) are listed without a program name.
 - Windows doesn't say where UDP traffic goes, so QUIC (HTTP/3) connections only show on Linux and macOS.

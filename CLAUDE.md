@@ -16,6 +16,8 @@ A standalone desktop app (Wails: Go + the system web view) that shows every conn
 - `internal/netstat`: the connection tables. `linux.go` (/proc), `darwin.go` + `pcblist.go` (sysctl `net.inet.*.pcblist_n`, struct offsets from xnu, falls back to lsof), `windows.go` (+ `gopsutil.go`: GetExtendedTcpTable).
 - `internal/monitor`: scans, diffs, direction (in/out), services, logs events, `demo.go` (made-up data, `NETMON_DEMO=1`).
 - `internal/geo`: DB-IP Lite City + ASN (mmdb), downloaded to the data folder; DB-IP first, the `@ip-location-db` npm packages as fallback. Both record layouts are decoded.
+- `internal/ping`: ICMP through unprivileged ping sockets (Linux, macOS) or IcmpSendEcho (Windows), TCP-connect timing as the fallback. `internal/risk`: the 0–100 score with reasons (`risk.go`) and the downloaded blocklists (`blocklist.go`).
+- Traffic per connection: Linux `diag_linux.go` (netlink sock_diag tcp_info, joined by inode), macOS `pcblist.go` (xsockstat_n, t_srtt), Windows `estats_windows.go` (GetPerTcpConnectionEStats: administrators only).
 - `internal/logs`: JSONL per day, search, CSV. `internal/update`: GitHub releases, SHA256SUMS, per-system install (`apply_*.go`). `internal/settings`, `internal/publicip`, `internal/rdns`, `internal/paths`.
 - `frontend/`: React + TypeScript + globe.gl. `src/wailsjs` is generated (`wails generate module`); the page uses its own types in `src/lib/types.ts`. Host names come from DNS: escape everything put into HTML (`esc`).
 - `packaging/arch/PKGBUILD` builds from the checkout; `build/` holds the Wails platform files (icon, NSIS script set to a per-user install, macOS Info.plist).

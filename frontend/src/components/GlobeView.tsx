@@ -3,8 +3,9 @@ import Globe, { type GlobeInstance } from "globe.gl"
 import { feature } from "topojson-client"
 import countriesTopo from "world-atlas/countries-110m.json"
 import type { HostGroup } from "../lib/store"
+import { latency } from "../lib/store"
 import type { Me } from "../lib/types"
-import { coords, count, duration, esc, place } from "../lib/format"
+import { bytes, bytesRate, coords, count, duration, esc, ms, place, riskName } from "../lib/format"
 
 // The globe: one line per remote address, from it to you (or from you to
 // it), with a light running along it in the direction the connection was
@@ -34,7 +35,17 @@ type PointD = {
 type Entry = { arc: ArcD; pulse: ArcD; point: PointD; dir: string }
 
 const OUT = "226, 226, 230"
-const IN = "232, 176, 75"
+const IN = "138, 180, 248"
+const MEDIUM = "232, 176, 75"
+const HIGH = "239, 107, 107"
+
+// A line's colour: its risk when that's medium or high, else its direction.
+function rgbOf(g: HostGroup): string {
+    const lvl = g.host?.risk?.level
+    if (lvl === "high") return HIGH
+    if (lvl === "medium") return MEDIUM
+    return g.dir === "in" ? IN : OUT
+}
 
 function hash(s: string): number {
     let h = 2166136261
@@ -89,6 +100,23 @@ function tipHtml(g: HostGroup, me: Me | null): string {
     if (h?.timeZone) rows.push(["Time zone", esc(h.timeZone)])
     if (h?.hasCoords && me?.known) rows.push(["Distance", `${count(Math.round(distanceKm(me.lat, me.lon, h.lat, h.lon)))} km from you`])
     rows.push(["Open for", esc(duration(Date.now() - g.since)) + (g.conns.length > 1 ? ` <span class="subtle">· ${g.conns.length} connections</span>` : "")])
+    if (g.hasBytes) {
+        const now = g.rxRate + g.txRate > 0 ? `<br><span class="subtle">now ↓ ${esc(bytesRate(g.rxRate))} ↑ ${esc(bytesRate(g.txRate))}</span>` : ""
+        rows.push(["Traffic", `↓ ${esc(bytes(g.rx))} ↑ ${esc(bytes(g.tx))}${now}`])
+    }
+    const lat = latency(g)
+    if (lat !== undefined) {
+        const p = h?.ping
+        const how = p && p.received > 0 ? (p.method === "icmp" ? "ping" : "TCP") + (p.sent > p.received ? `, ${Math.round(((p.sent - p.received) / p.sent) * 100)}% lost` : "") : "connection"
+        rows.push(["Latency", `${esc(ms(lat))} <span class="subtle">${how}</span>`])
+    } else if (h?.ping && h.ping.received === 0) {
+        rows.push(["Latency", `<span class="subtle">no answer to ping</span>`])
+    }
+    const r = h?.risk
+    if (r) {
+        const why = r.reasons.length ? `<ul class="why">${r.reasons.slice(0, 4).map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""
+        rows.push(["Risk", `<span class="risk ${r.level}">${riskName[r.level]} · ${r.score}</span>${why}`])
+    }
     const who = h?.name || h?.org || g.ip
     return `<div class="tip"><div class="head"><div class="who">${esc(who)}</div>${who !== g.ip ? `<div class="ip">${esc(g.ip)}</div>` : ""}</div><dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`
 }
@@ -121,6 +149,7 @@ export function GlobeView({ groups, me, active, focus, selected, onHover, onSele
     const meRef = useRef<Me | null>(null)
     const hl = useRef<{ focus: string | null; selected: string | null }>({ focus: null, selected: null })
     const centered = useRef(false)
+    const styleSig = useRef("")
     const cb = useRef({ onHover, onSelect })
     cb.current = { onHover, onSelect }
 
@@ -269,6 +298,12 @@ export function GlobeView({ groups, me, active, focus, selected, onHover, onSele
                 changed = true
             }
         }
+        // Colours and widths follow risk and traffic, which change between scans.
+        const sig = groups.map(g => `${g.ip}:${g.host?.risk?.level}:${Math.round(Math.log10(1 + (g.rxRate + g.txRate) / 1000) * 3)}`).join(",")
+        if (sig !== styleSig.current) {
+            styleSig.current = sig
+            restyle()
+        }
         if (!changed) return
         const list = [...map.values()]
         g.arcsData([...list.map(e => e.arc), ...list.map(e => e.pulse)])
@@ -292,20 +327,23 @@ export function GlobeView({ groups, me, active, focus, selected, onHover, onSele
         const on = (ip: string) => ip === focus || ip === selected
         g.arcColor((d: object) => {
             const a = d as ArcD
-            const rgb = a.g.dir === "in" ? IN : OUT
+            const rgb = rgbOf(a.g)
+            const plain = rgb === OUT
             if (a.kind === "pulse") return on(a.ip) ? `rgba(255,255,255,1)` : `rgba(${rgb}, ${any ? 0.35 : 0.95})`
-            if (on(a.ip)) return a.g.dir === "in" ? `rgba(${IN}, 1)` : "rgba(255,255,255,0.95)"
-            return `rgba(${rgb}, ${any ? 0.12 : a.g.dir === "in" ? 0.5 : 0.32})`
+            if (on(a.ip)) return plain ? "rgba(255,255,255,0.95)" : `rgba(${rgb}, 1)`
+            return `rgba(${rgb}, ${any ? 0.12 : plain ? 0.32 : 0.55})`
         })
         g.arcStroke((d: object) => {
             const a = d as ArcD
-            if (a.kind === "pulse") return on(a.ip) ? 0.75 : 0.5
-            return on(a.ip) ? 0.55 : 0.26
+            // Busier connections draw thicker lines.
+            const busy = Math.min(0.3, Math.log10(1 + (a.g.rxRate + a.g.txRate) / 1000) * 0.1)
+            if (a.kind === "pulse") return (on(a.ip) ? 0.75 : 0.5) + busy
+            return (on(a.ip) ? 0.55 : 0.26) + busy
         })
         g.pointColor((d: object) => {
             const p = d as PointD
             if (p.kind === "me") return "#f4f2ec"
-            const rgb = p.g?.dir === "in" ? IN : OUT
+            const rgb = p.g ? rgbOf(p.g) : OUT
             return on(p.ip) ? "#ffffff" : `rgba(${rgb}, ${any ? 0.4 : 0.85})`
         })
     }

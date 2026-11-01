@@ -5,7 +5,7 @@ import type { Settings } from "../lib/types"
 import { bytes, coords, dbVersion } from "../lib/format"
 
 export function SettingsPage() {
-    const { settings, setSettings, snap, geo, update, info } = useStore()
+    const { settings, setSettings, snap, geo, update, info, blocklists } = useStore()
     const [loc, setLoc] = useState(settings?.location)
     const [locErr, setLocErr] = useState("")
     const [checking, setChecking] = useState(false)
@@ -110,10 +110,50 @@ export function SettingsPage() {
                         <Row label="Include local connections" hint="Also list and log connections inside this computer and to your home network.">
                             <Switch on={settings.showLocal} set={v => save({ showLocal: v })} />
                         </Row>
+                        <Row
+                            label="Ping hosts"
+                            hint={snap && !snap.icmp ? snap.icmpNote || "Ping (ICMP) isn't allowed here." : "Pings every host on the internet when it's first seen and then once a minute (3 small packets), for its latency."}
+                        >
+                            <Switch on={settings.pingHosts} set={v => save({ pingHosts: v })} />
+                        </Row>
+                        {snap && (
+                            <div className="subtle" style={{ fontSize: 12 }}>
+                                Traffic per connection: {snap.perConn ? "counted" : "not available"}
+                                {snap.perConnNote ? `. ${snap.perConnNote}` : "."}
+                            </div>
+                        )}
                         {snap && (
                             <div className="subtle" style={{ fontSize: 12 }}>
                                 Reading the connection table takes {snap.scanMs.toFixed(1)} ms ({snap.method}).
                                 {snap.error && <span className="err"> {snap.error}</span>}
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="card">
+                        <h2>Risk checks</h2>
+                        <div className="desc">
+                            Each host gets a risk score from 0 to 100, with its reasons: being on a public blocklist, someone on the internet connecting in (more so to remote access like SSH or Remote Desktop), unencrypted protocols, ports malware likes, and programs running from a temporary or downloads folder. It's a hint where to look, not a verdict. Where an address is (its country) doesn't count.
+                        </div>
+                        <Row
+                            label="Check addresses against blocklists"
+                            hint={
+                                blocklists?.lists?.some(l => l.entries > 0)
+                                    ? `${blocklists.lists
+                                          .filter(l => l.entries > 0)
+                                          .map(l => `${l.name} (${l.entries.toLocaleString()})`)
+                                          .join(", ")} · updated ${new Date(blocklists.updated).toLocaleString()}. Downloaded twice a day; nothing about your connections is sent.`
+                                    : "FireHOL level 1 and abuse.ch's Feodo Tracker, downloaded twice a day; nothing about your connections is sent."
+                            }
+                        >
+                            <Switch on={settings.blocklists} set={v => save({ blocklists: v })} />
+                        </Row>
+                        {blocklists?.error && <div className="err">{blocklists.error}</div>}
+                        {settings.blocklists && (
+                            <div>
+                                <button className="btn" onClick={() => api.updateBlocklists()}>
+                                    Update the blocklists now
+                                </button>
                             </div>
                         )}
                     </section>

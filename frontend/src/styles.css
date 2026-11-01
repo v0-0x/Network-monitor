@@ -15,7 +15,9 @@
     --line: rgba(255, 255, 255, 0.06);
     --line2: rgba(255, 255, 255, 0.1);
     --accent: #e9e6df;
-    --in: #e8b04b;
+    --in: #8ab4f8;
+    --medium: #e8b04b;
+    --high: #ef6b6b;
     --danger: #ef6b6b;
     --ok: #7fbf8e;
     --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -456,8 +458,74 @@ select {
 }
 
 .badge.in {
-    background: rgba(232, 176, 75, 0.14);
+    background: rgba(138, 180, 248, 0.14);
     color: var(--in);
+}
+
+.risk {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.risk::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--subtle);
+}
+
+.risk.medium {
+    color: var(--medium);
+}
+
+.risk.medium::before {
+    background: var(--medium);
+}
+
+.risk.high {
+    color: var(--high);
+}
+
+.risk.high::before {
+    background: var(--high);
+}
+
+.risk.low {
+    color: var(--muted);
+}
+
+.why {
+    margin: 4px 0 0;
+    padding-left: 14px;
+    color: var(--muted);
+}
+
+.why li {
+    margin: 1px 0;
+}
+
+.risk-tag {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 0 6px;
+    border-radius: 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 17px;
+}
+
+.risk-tag.medium {
+    background: rgba(232, 176, 75, 0.14);
+    color: var(--medium);
+}
+
+.risk-tag.high {
+    background: rgba(239, 107, 107, 0.16);
+    color: var(--high);
 }
 
 .dim {
@@ -539,6 +607,22 @@ select {
     color: var(--subtle);
 }
 
+.stat-btn {
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.stat-btn.medium .v {
+    color: var(--medium);
+}
+
+.stat-btn.high .v {
+    color: var(--high);
+}
+
 .me-chip {
     display: flex;
     align-items: center;
@@ -598,6 +682,10 @@ select {
 
 .legend .line.in {
     background: var(--in);
+}
+
+.legend .line.risk {
+    background: linear-gradient(90deg, #e8b04b 0 50%, #ef6b6b 50% 100%);
 }
 
 .legend .credit {
@@ -766,7 +854,8 @@ select {
     color: var(--muted);
 }
 
-.k-error {
+.k-error,
+.k-alert {
     color: var(--danger);
 }
 
@@ -780,7 +869,7 @@ select {
 }
 
 .tip {
-    width: 300px;
+    width: 320px;
     padding: 12px 13px;
     border-radius: 10px;
     background: rgba(24, 24, 27, 0.96);
@@ -830,6 +919,10 @@ select {
     background: var(--in);
 }
 
+.tip .why {
+    font-size: 11.5px;
+}
+
 /* ---------- Tables ---------- */
 
 .table {
@@ -857,6 +950,7 @@ select {
 }
 
 .thead button {
+    white-space: nowrap;
     background: none;
     border: 0;
     padding: 0;
@@ -871,6 +965,12 @@ select {
 
 .thead button.on {
     color: var(--text);
+}
+
+.trow > span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .trow {
@@ -986,7 +1086,7 @@ select {
     padding: 3px 8px;
     border-radius: 6px;
     background: rgba(232, 176, 75, 0.12);
-    color: var(--in);
+    color: var(--medium);
     font-size: 11.5px;
     font-weight: 500;
 }
