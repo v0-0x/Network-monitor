@@ -116,7 +116,11 @@ jobs:
           GOOS=darwin CGO_ENABLED=0 go vet ./internal/...
       - run: go test -count=1 -timeout 5m ./...
       - name: Ping and traffic per connection (shown)
-        run: go test -count=1 -v -run 'ICMP|CountsBytes|SeesOwn' ./internal/netstat/ ./internal/ping/
+        run: |
+          # Let users send ICMP the way systemd sets it up on Arch (Ubuntu's
+          # runner doesn't), so the Linux ping path is tested for real.
+          sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+          go test -count=1 -v -run 'ICMP|CountsBytes|SeesOwn' ./internal/netstat/ ./internal/ping/
       - name: Build and self-test
         run: |
           go build -tags desktop,production,webkit2_41 -o network-monitor .
